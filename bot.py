@@ -196,10 +196,14 @@ class CheeseBot(discord.Client):
                 
                 channel = self.get_channel(config["cheese_channel"])
                 if channel:
-                    await channel.send(
-                        content="🧀 **Daily Cheese Alert!** 🧀", 
-                        embed=embed
-                    )
+                    # Check if there's a cheese role to ping
+                    content = "🧀 **Daily Cheese Alert!** 🧀"
+                    if "cheese_role_id" in config:
+                        role = channel.guild.get_role(config["cheese_role_id"])
+                        if role:
+                            content = f"🧀 **Daily Cheese Alert!** 🧀 {role.mention}"
+                    
+                    await channel.send(content=content, embed=embed)
                     logger.info(f"Posted daily cheese: {cheese_name}")
                 else:
                     logger.error(f"Could not find channel with ID {config['cheese_channel']}")
@@ -220,6 +224,16 @@ bot = CheeseBot()
 @bot.tree.command(name="setcheesechannel", description="Set the channel for daily Cheese of the Day posts.")
 @app_commands.describe(channel="The channel to post daily cheese updates (optional, defaults to current channel)")
 async def setcheesechannel(interaction: discord.Interaction, channel: discord.TextChannel = None):
+    # Check if user has permission (admin or manage channels)
+    if not interaction.user.guild_permissions.manage_channels:
+        embed = discord.Embed(
+            title="❌ Permission Denied",
+            description="You need the 'Manage Channels' permission to set the cheese channel.",
+            color=discord.Color.red()
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+        
     target_channel = channel or interaction.channel
     config["cheese_channel"] = target_channel.id
     save_config(config)
@@ -231,35 +245,132 @@ async def setcheesechannel(interaction: discord.Interaction, channel: discord.Te
     )
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-# Command: Set cheese time
-@bot.tree.command(name="setcheesetime", description="Set the time for daily cheese posting (Philippine time, 24-hour format).")
-@app_commands.describe(time_str="Time in HH:MM format (24-hour), Philippine time (e.g., 14:30)")
-async def setcheesetime(interaction: discord.Interaction, time_str: str):
-    try:
-        hour, minute = map(int, time_str.split(":"))
-        if not (0 <= hour < 24 and 0 <= minute < 60):
-            raise ValueError("Invalid time range")
-    except ValueError:
+# Command: Set cheese role
+@bot.tree.command(name="setcheeserole", description="Set a role to ping for daily cheese updates.")
+@app_commands.describe(role="The role to ping for daily cheese updates")
+async def setcheeserole(interaction: discord.Interaction, role: discord.Role):
+    # Check if user has permission (admin or manage roles)
+    if not interaction.user.guild_permissions.manage_roles:
         embed = discord.Embed(
-            title="❌ Invalid Time Format",
-            description="Please use HH:MM format in 24-hour time.\nExample: `14:30` for 2:30 PM",
+            title="❌ Permission Denied",
+            description="You need the 'Manage Roles' permission to set the cheese role.",
             color=discord.Color.red()
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
         return
-
-    config["cheese_time"] = time_str
+    
+    config["cheese_role_id"] = role.id
     save_config(config)
     
-    # Convert to 12-hour format for user-friendly display
-    dt = datetime.strptime(time_str, "%H:%M")
-    friendly_time = dt.strftime("%I:%M %p")
-    
     embed = discord.Embed(
-        title="⏰ Time Set",
-        description=f"Daily cheese will be posted at **{friendly_time}** Philippine time",
+        title="✅ Cheese Role Set",
+        description=f"The {role.mention} role will be pinged for daily cheese updates!",
         color=discord.Color.green()
     )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+# Command: Remove cheese role
+@bot.tree.command(name="removecheeserole", description="Remove the cheese notification role.")
+async def removecheeserole(interaction: discord.Interaction):
+    # Check if user has permission
+    if not interaction.user.guild_permissions.manage_roles:
+        embed = discord.Embed(
+            title="❌ Permission Denied",
+            description="You need the 'Manage Roles' permission to remove the cheese role.",
+            color=discord.Color.red()
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    if "cheese_role_id" in config:
+        role_id = config["cheese_role_id"]
+        role = interaction.guild.get_role(role_id)
+        role_name = role.name if role else "Unknown Role"
+        
+        del config["cheese_role_id"]
+        save_config(config)
+        
+        embed = discord.Embed(
+            title="✅ Cheese Role Removed",
+            description=f"The '{role_name}' role will no longer be pinged for daily cheese updates.",
+            color=discord.Color.green()
+        )
+    else:
+        embed = discord.Embed(
+            title="ℹ️ No Role Set",
+            description="There was no cheese notification role configured.",
+            color=discord.Color.blue()
+        )
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+# Command: Join/Leave cheese role (for users)
+@bot.tree.command(name="cheeserole", description="Join or leave the cheese notification role.")
+async def cheeserole(interaction: discord.Interaction):
+    if "cheese_role_id" not in config:
+        embed = discord.Embed(
+            title="❌ No Cheese Role",
+            description="No cheese notification role has been set up yet. Ask an admin to set one using `/setcheeserole`.",
+            color=discord.Color.red()
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    role = interaction.guild.get_role(config["cheese_role_id"])
+    if not role:
+        embed = discord.Embed(
+            title="❌ Role Not Found",
+            description="The configured cheese role no longer exists. Ask an admin to set a new one.",
+            color=discord.Color.red()
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    user = interaction.user
+    
+    if role in user.roles:
+        # User has the role, remove it
+        try:
+            await user.remove_roles(role, reason="User left cheese notifications")
+            embed = discord.Embed(
+                title="📤 Left Cheese Role",
+                description=f"You've been removed from the {role.mention} role. You won't receive daily cheese pings anymore.",
+                color=discord.Color.orange()
+            )
+        except discord.Forbidden:
+            embed = discord.Embed(
+                title="❌ Permission Error",
+                description="I don't have permission to remove that role from you. Ask an admin for help.",
+                color=discord.Color.red()
+            )
+        except Exception as e:
+            embed = discord.Embed(
+                title="❌ Error",
+                description=f"Failed to remove role: {str(e)}",
+                color=discord.Color.red()
+            )
+    else:
+        # User doesn't have the role, add it
+        try:
+            await user.add_roles(role, reason="User joined cheese notifications")
+            embed = discord.Embed(
+                title="📥 Joined Cheese Role",
+                description=f"You've been added to the {role.mention} role! You'll now receive daily cheese pings. 🧀",
+                color=discord.Color.green()
+            )
+        except discord.Forbidden:
+            embed = discord.Embed(
+                title="❌ Permission Error",
+                description="I don't have permission to give you that role. Ask an admin for help.",
+                color=discord.Color.red()
+            )
+        except Exception as e:
+            embed = discord.Embed(
+                title="❌ Error",
+                description=f"Failed to add role: {str(e)}",
+                color=discord.Color.red()
+            )
+    
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # Command: Get daily cheese
@@ -320,7 +431,14 @@ async def cheesestatus(interaction: discord.Interaction):
     else:
         channel_info = "Not configured"
     
-    embed.add_field(name="📺 Daily Cheese Channel", value=channel_info, inline=False)
+    # Role info
+    if "cheese_role_id" in config:
+        role = bot.get_guild(interaction.guild.id).get_role(config["cheese_role_id"]) if interaction.guild else None
+        role_info = f"<@&{config['cheese_role_id']}>" if role else "Role not found"
+    else:
+        role_info = "Not configured"
+    
+    embed.add_field(name="🔔 Notification Role", value=role_info, inline=False)
     
     # Time info
     if "cheese_time" in config:

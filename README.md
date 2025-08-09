@@ -10,5 +10,5 @@ A Discord bot that posts the Cheese of the Day from cheese.com, plus random chee
 ## Setup
 1. **Clone repo**
 ```bash
-git clone https://github.com/yourname/cheese-bot
+git clone https://github.com/KimochiDesu/cheese-bot
 cd cheese-bot

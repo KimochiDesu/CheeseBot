@@ -261,6 +261,68 @@ async def setcheesechannel(interaction: discord.Interaction, channel: discord.Te
     )
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
+# Command: Set cheese time
+@bot.tree.command(name="setcheesetime", description="Set the time for daily Cheese of the Day posts (Philippine Time).")
+@app_commands.describe(time="Time in HH:MM format (24-hour, Philippine Time)")
+async def setcheesetime(interaction: discord.Interaction, time: str):
+    # Check if user has permission (admin or manage channels)
+    if not interaction.user.guild_permissions.manage_channels:
+        embed = discord.Embed(
+            title="❌ Permission Denied",
+            description="You need the 'Manage Channels' permission to set the cheese time.",
+            color=discord.Color.red()
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    # Validate time format
+    try:
+        # Try to parse the time to validate format
+        datetime.strptime(time, "%H:%M")
+        hour, minute = map(int, time.split(":"))
+        
+        # Validate hour and minute ranges
+        if not (0 <= hour <= 23) or not (0 <= minute <= 59):
+            raise ValueError("Invalid time range")
+            
+    except ValueError:
+        embed = discord.Embed(
+            title="❌ Invalid Time Format",
+            description="Please use HH:MM format (24-hour). Examples: `09:00`, `14:30`, `23:59`",
+            color=discord.Color.red()
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    config["cheese_time"] = time
+    save_config(config)
+    
+    # Convert to 12-hour format for display
+    try:
+        dt = datetime.strptime(time, "%H:%M")
+        friendly_time = dt.strftime("%I:%M %p")
+    except ValueError:
+        friendly_time = time
+    
+    embed = discord.Embed(
+        title="✅ Time Set",
+        description=f"Daily cheese updates will be posted at **{friendly_time}** (Philippine Time)",
+        color=discord.Color.green()
+    )
+    
+    # Calculate next post time
+    seconds_left = bot.seconds_until_next_run()
+    if seconds_left:
+        hours = int(seconds_left // 3600)
+        minutes = int((seconds_left % 3600) // 60)
+        embed.add_field(
+            name="⏰ Next Post", 
+            value=f"In {hours}h {minutes}m", 
+            inline=True
+        )
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
 # Command: Set cheese role
 @bot.tree.command(name="setcheeserole", description="Set a role to ping for daily cheese updates.")
 @app_commands.describe(role="The role to ping for daily cheese updates")
@@ -392,45 +454,67 @@ async def cheeserole(interaction: discord.Interaction):
 # Command: Get daily cheese
 @bot.tree.command(name="dailycheese", description="Get today's featured Cheese of the Day.")
 async def dailycheese(interaction: discord.Interaction):
-    await interaction.response.defer(thinking=True)
     try:
+        await interaction.response.defer(thinking=True)
+        logger.info(f"Daily cheese command called by {interaction.user}")
+        
         url, cheese_name = get_cheese_of_the_day()
+        logger.info(f"Got cheese URL: {url}, name: {cheese_name}")
+        
         details = get_cheese_details(url)
+        logger.info(f"Got cheese details for: {details.get('name', 'Unknown')}")
+        
         embed = bot.make_cheese_embed(details)
         await interaction.followup.send(
             content="🌟 **Today's Featured Cheese** 🌟", 
             embed=embed
         )
-        logger.info(f"Served daily cheese: {cheese_name}")
+        logger.info(f"✅ Served daily cheese: {cheese_name}")
     except Exception as e:
-        logger.error(f"Error fetching daily cheese: {e}")
-        error_embed = discord.Embed(
-            title="❌ Error",
-            description="Sorry, I couldn't fetch today's cheese. The website might be temporarily unavailable.",
-            color=discord.Color.red()
-        )
-        await interaction.followup.send(embed=error_embed)
+        logger.error(f"Error fetching daily cheese: {e}", exc_info=True)
+        try:
+            error_embed = discord.Embed(
+                title="❌ Error",
+                description="Sorry, I couldn't fetch today's cheese. The website might be temporarily unavailable.",
+                color=discord.Color.red()
+            )
+            if interaction.response.is_done():
+                await interaction.followup.send(embed=error_embed)
+            else:
+                await interaction.response.send_message(embed=error_embed, ephemeral=True)
+        except Exception as followup_error:
+            logger.error(f"Failed to send error message: {followup_error}")
 
 # Command: Get random cheese
 @bot.tree.command(name="cheese", description="Discover a random cheese from around the world!")
 async def cheese(interaction: discord.Interaction):
-    await interaction.response.defer(thinking=True)
     try:
+        await interaction.response.defer(thinking=True)
+        logger.info(f"Random cheese command called by {interaction.user}")
+        
         details = get_random_cheese()
+        logger.info(f"Got random cheese: {details.get('name', 'Unknown')}")
+        
         embed = bot.make_cheese_embed(details)
         await interaction.followup.send(
             content="🎲 **Random Cheese Discovery** 🎲", 
             embed=embed
         )
-        logger.info(f"Served random cheese: {details.get('name', 'Unknown')}")
+        logger.info(f"✅ Served random cheese: {details.get('name', 'Unknown')}")
     except Exception as e:
-        logger.error(f"Error fetching random cheese: {e}")
-        error_embed = discord.Embed(
-            title="❌ Error",
-            description="Oops! I couldn't find a random cheese right now. Please try again in a moment.",
-            color=discord.Color.red()
-        )
-        await interaction.followup.send(embed=error_embed)
+        logger.error(f"Error fetching random cheese: {e}", exc_info=True)
+        try:
+            error_embed = discord.Embed(
+                title="❌ Error",
+                description="Oops! I couldn't find a random cheese right now. Please try again in a moment.",
+                color=discord.Color.red()
+            )
+            if interaction.response.is_done():
+                await interaction.followup.send(embed=error_embed)
+            else:
+                await interaction.response.send_message(embed=error_embed, ephemeral=True)
+        except Exception as followup_error:
+            logger.error(f"Failed to send error message: {followup_error}")
 
 # Command: Show bot status and configuration
 @bot.tree.command(name="cheesestatus", description="Show current bot configuration and status.")

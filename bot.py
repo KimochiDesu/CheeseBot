@@ -182,6 +182,7 @@ class CheeseBot(discord.Client):
     async def daily_cheese_task(self):
         """Background task for posting daily cheese."""
         if "cheese_channel" not in config or "cheese_time" not in config:
+            logger.debug("Daily cheese task skipped - missing channel or time config")
             return
 
         try:
@@ -189,29 +190,44 @@ class CheeseBot(discord.Client):
             now_ph = datetime.utcnow() + timedelta(hours=8)
             set_hour, set_minute = map(int, config["cheese_time"].split(":"))
             
+            # Add debug logging
+            logger.debug(f"Current PH time: {now_ph.strftime('%H:%M')}, Target: {config['cheese_time']}")
+            
             if now_ph.hour == set_hour and now_ph.minute == set_minute:
+                logger.info("Time match! Starting daily cheese post...")
+                
                 url, cheese_name = get_cheese_of_the_day()
                 details = get_cheese_details(url)
                 embed = self.make_cheese_embed(details)
                 
                 channel = self.get_channel(config["cheese_channel"])
                 if channel:
+                    logger.info(f"Found channel: {channel.name} in {channel.guild.name}")
+                    
                     # Check if there's a cheese role to ping
                     content = "🧀 **Daily Cheese Alert!** 🧀"
                     if "cheese_role_id" in config:
                         role = channel.guild.get_role(config["cheese_role_id"])
                         if role:
                             content = f"🧀 **Daily Cheese Alert!** 🧀 {role.mention}"
+                            logger.info(f"Will ping role: {role.name}")
+                        else:
+                            logger.warning(f"Cheese role ID {config['cheese_role_id']} not found")
                     
                     await channel.send(content=content, embed=embed)
-                    logger.info(f"Posted daily cheese: {cheese_name}")
+                    logger.info(f"✅ Posted daily cheese: {cheese_name}")
                 else:
                     logger.error(f"Could not find channel with ID {config['cheese_channel']}")
                 
                 # Sleep to avoid posting multiple times in the same minute
                 await asyncio.sleep(65)
+            else:
+                # Only log every 10 minutes to avoid spam
+                if now_ph.minute % 10 == 0:
+                    logger.debug(f"Waiting for cheese time. Current: {now_ph.strftime('%H:%M')}, Target: {config['cheese_time']}")
+                    
         except Exception as e:
-            logger.error(f"Error posting daily cheese: {e}")
+            logger.error(f"Error posting daily cheese: {e}", exc_info=True)
 
     @daily_cheese_task.before_loop
     async def before_daily_cheese_task(self):
@@ -461,7 +477,15 @@ async def cheesestatus(interaction: discord.Interaction):
     embed.add_field(name="⏰ Daily Post Time", value=time_info, inline=False)
     
     # Commands info
-    commands_info = "`/cheese` - Random cheese\n`/dailycheese` - Today's featured cheese\n`/setcheesechannel` - Configure channel\n`/setcheesetime` - Configure time"
+    commands_info = (
+        "`/cheese` - Random cheese\n"
+        "`/dailycheese` - Today's featured cheese\n"
+        "`/cheeserole` - Join/leave cheese notifications\n"
+        "`/setcheesechannel` - Configure channel (Admin)\n"
+        "`/setcheesetime` - Configure time (Admin)\n"
+        "`/setcheeserole` - Set notification role (Admin)\n"
+        "`/removecheeserole` - Remove notification role (Admin)"
+    )
     embed.add_field(name="📋 Available Commands", value=commands_info, inline=False)
     
     embed.set_footer(text="Powered by cheese.com")
@@ -481,8 +505,11 @@ async def cheesehelp(interaction: discord.Interaction):
     commands = [
         ("🎲 `/cheese`", "Get a random cheese from around the world"),
         ("🌟 `/dailycheese`", "Get today's featured Cheese of the Day"),
+        ("🔔 `/cheeserole`", "Join or leave daily cheese notifications"),
         ("📺 `/setcheesechannel`", "Set channel for daily cheese posts (Admin only)"),
         ("⏰ `/setcheesetime`", "Set time for daily posts in PH time (Admin only)"),
+        ("🔔 `/setcheeserole`", "Set role to ping for daily cheese (Admin only)"),
+        ("🚫 `/removecheeserole`", "Remove cheese notification role (Admin only)"),
         ("📊 `/cheesestatus`", "View current bot configuration"),
         ("❓ `/cheesehelp`", "Show this help message")
     ]
